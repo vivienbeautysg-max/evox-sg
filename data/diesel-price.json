@@ -1,8 +1,9 @@
 {
-  "price": 3.83,
+  "price": 4.68,
   "currency": "SGD",
   "unit": "litre",
-  "date": "30 Mar 2026",
-  "source": "GlobalPetrolPrices.com",
-  "updated_at": "2026-04-11T10:00:00+08:00"
+  "date": "12 Apr 2026",
+  "source": "petrolprice.sg",
+  "updated_at": "2026-04-12T10:00:00+08:00",
+  "details": "Shell/Esso/Caltex/Sinopec: S$4.68, SPC: S$4.62, Smart Energy: S$4.88"
 }

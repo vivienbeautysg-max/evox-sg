@@ -14,18 +14,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch diesel price
+      - name: Fetch diesel price from petrolprice.sg
         run: |
-          # Fetch from GlobalPetrolPrices.com Singapore diesel page
-          PRICE=$(curl -s "https://www.globalpetrolprices.com/Singapore/diesel_prices/" \
-            -H "User-Agent: Mozilla/5.0" | \
-            grep -oP '(?<=<span id="graphPageGraph498">)\d+\.\d+' | head -1)
+          # Primary source: petrolprice.sg (most accurate Singapore pump prices)
+          PAGE=$(curl -s "https://petrolprice.sg/" -H "User-Agent: Mozilla/5.0")
 
-          # Fallback: try alternative pattern
+          # Extract diesel prices - look for diesel section
+          PRICE=$(echo "$PAGE" | grep -oP 'Diesel.*?\$(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
+
+          # Fallback: try GlobalPetrolPrices
           if [ -z "$PRICE" ]; then
             PRICE=$(curl -s "https://www.globalpetrolprices.com/Singapore/diesel_prices/" \
               -H "User-Agent: Mozilla/5.0" | \
               grep -oP '\d+\.\d+(?= SGD)' | head -1)
+            SOURCE="GlobalPetrolPrices.com"
+          else
+            SOURCE="petrolprice.sg"
           fi
 
           # If still empty, keep existing price
@@ -37,23 +41,23 @@ jobs:
           DATE=$(date -u +"%d %b %Y")
           UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
 
-          cat > data/diesel-price.json << EOF
-          {
-            "price": $PRICE,
-            "currency": "SGD",
-            "unit": "litre",
-            "date": "$DATE",
-            "source": "GlobalPetrolPrices.com",
-            "updated_at": "$UPDATED"
-          }
-          EOF
+          cat > data/diesel-price.json << EOFJ
+{
+  "price": $PRICE,
+  "currency": "SGD",
+  "unit": "litre",
+  "date": "$DATE",
+  "source": "$SOURCE",
+  "updated_at": "$UPDATED"
+}
+EOFJ
 
-          echo "Updated diesel price: SGD $PRICE on $DATE"
+          echo "Updated diesel price: SGD $PRICE on $DATE from $SOURCE"
 
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/diesel-price.json
-          git diff --staged --quiet || git commit -m "Update diesel price $(date +%Y-%m-%d)"
+          git diff --staged --quiet || git commit -m "Auto-update diesel price: $(cat data/diesel-price.json | grep price | head -1)"
           git push
