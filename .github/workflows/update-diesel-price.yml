@@ -2,8 +2,8 @@ name: Update Singapore Diesel Price
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # Run daily at 10am SGT (2am UTC)
-  workflow_dispatch:  # Allow manual trigger
+    - cron: '0 2 * * 1'  # Every Monday at 10am SGT (2am UTC) — data updates weekly
+  workflow_dispatch:  # Allow manual trigger anytime
 
 permissions:
   contents: write
@@ -14,50 +14,115 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch diesel price from petrolprice.sg
+      - name: Install dependencies
         run: |
-          # Primary source: petrolprice.sg (most accurate Singapore pump prices)
-          PAGE=$(curl -s "https://petrolprice.sg/" -H "User-Agent: Mozilla/5.0")
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq
 
-          # Extract diesel prices - look for diesel section
-          PRICE=$(echo "$PAGE" | grep -oP 'Diesel.*?\$(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
+      - name: Fetch Singapore diesel price
+        run: |
+          echo "=== Attempting multiple sources ==="
 
-          # Fallback: try GlobalPetrolPrices
-          if [ -z "$PRICE" ]; then
-            PRICE=$(curl -s "https://www.globalpetrolprices.com/Singapore/diesel_prices/" \
-              -H "User-Agent: Mozilla/5.0" | \
-              grep -oP '\d+\.\d+(?= SGD)' | head -1)
-            SOURCE="GlobalPetrolPrices.com"
-          else
-            SOURCE="petrolprice.sg"
+          PRICE=""
+          SOURCE=""
+
+          # Source 1: GlobalPetrolPrices.com (official government data, SGD/L)
+          # Their page renders dynamically, so we try to find the price in meta/text
+          GPP_PAGE=$(curl -sL "https://www.globalpetrolprices.com/Singapore/diesel_prices/" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -H "Accept: text/html,application/xhtml+xml" \
+            -H "Accept-Language: en-US,en;q=0.9" \
+            --max-time 15 2>/dev/null || true)
+
+          if [ -n "$GPP_PAGE" ]; then
+            # Try multiple patterns to find the SGD price
+            PRICE=$(echo "$GPP_PAGE" | grep -oP 'SGD\s*(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
+            if [ -z "$PRICE" ]; then
+              PRICE=$(echo "$GPP_PAGE" | grep -oP '(\d+\.\d+)\s*SGD' | grep -oP '\d+\.\d+' | head -1)
+            fi
+            if [ -z "$PRICE" ]; then
+              # Look for price in specific page patterns
+              PRICE=$(echo "$GPP_PAGE" | grep -oP 'current.*?price.*?(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
+            fi
+            if [ -z "$PRICE" ]; then
+              # Try the graph data span
+              PRICE=$(echo "$GPP_PAGE" | grep -oP 'graph.*?>(\d+\.\d+)<' | grep -oP '\d+\.\d+' | head -1)
+            fi
+            if [ -n "$PRICE" ]; then
+              SOURCE="GlobalPetrolPrices.com"
+              echo "Found from GlobalPetrolPrices: SGD $PRICE"
+            fi
           fi
 
-          # If still empty, keep existing price
+          # Source 2: TheGlobalEconomy.com (backup)
           if [ -z "$PRICE" ]; then
-            echo "Could not fetch price, keeping existing"
+            TGE_PAGE=$(curl -sL "https://www.theglobaleconomy.com/Singapore/diesel_prices/" \
+              -H "User-Agent: Mozilla/5.0" --max-time 15 2>/dev/null || true)
+            if [ -n "$TGE_PAGE" ]; then
+              PRICE=$(echo "$TGE_PAGE" | grep -oP '\d+\.\d+(?=.*SGD)' | head -1)
+              if [ -z "$PRICE" ]; then
+                PRICE=$(echo "$TGE_PAGE" | grep -oP 'SGD.*?(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
+              fi
+              if [ -n "$PRICE" ]; then
+                SOURCE="TheGlobalEconomy.com"
+                echo "Found from TheGlobalEconomy: SGD $PRICE"
+              fi
+            fi
+          fi
+
+          # Source 3: CEIC Data (backup)
+          if [ -z "$PRICE" ]; then
+            CEIC_PAGE=$(curl -sL "https://www.ceicdata.com/en/singapore/average-retail-prices-2019100/retail-prices-diesel-per-litre" \
+              -H "User-Agent: Mozilla/5.0" --max-time 15 2>/dev/null || true)
+            if [ -n "$CEIC_PAGE" ]; then
+              PRICE=$(echo "$CEIC_PAGE" | grep -oP '\d+\.\d+(?=\s*SGD)' | head -1)
+              if [ -n "$PRICE" ]; then
+                SOURCE="CEIC Data"
+                echo "Found from CEIC: SGD $PRICE"
+              fi
+            fi
+          fi
+
+          # Validate price is reasonable (between 1.00 and 10.00 SGD)
+          if [ -n "$PRICE" ]; then
+            VALID=$(echo "$PRICE" | awk '{if ($1 >= 1.0 && $1 <= 10.0) print "yes"; else print "no"}')
+            if [ "$VALID" != "yes" ]; then
+              echo "WARNING: Price $PRICE seems unreasonable, skipping update"
+              PRICE=""
+            fi
+          fi
+
+          # If no price found, keep existing
+          if [ -z "$PRICE" ]; then
+            echo "Could not fetch price from any source, keeping existing data"
             exit 0
           fi
 
           DATE=$(date -u +"%d %b %Y")
           UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
 
-          cat > data/diesel-price.json << EOFJ
-{
-  "price": $PRICE,
-  "currency": "SGD",
-  "unit": "litre",
-  "date": "$DATE",
-  "source": "$SOURCE",
-  "updated_at": "$UPDATED"
-}
-EOFJ
+          # Write clean JSON
+          jq -n \
+            --argjson price "$PRICE" \
+            --arg currency "SGD" \
+            --arg unit "litre" \
+            --arg date "$DATE" \
+            --arg source "$SOURCE" \
+            --arg updated_at "$UPDATED" \
+            '{price: $price, currency: $currency, unit: $unit, date: $date, source: $source, updated_at: $updated_at}' \
+            > data/diesel-price.json
 
           echo "Updated diesel price: SGD $PRICE on $DATE from $SOURCE"
+          cat data/diesel-price.json
 
-      - name: Commit and push
+      - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/diesel-price.json
-          git diff --staged --quiet || git commit -m "Auto-update diesel price: $(cat data/diesel-price.json | grep price | head -1)"
-          git push
+          if git diff --staged --quiet; then
+            echo "No price change, skipping commit"
+          else
+            git commit -m "Auto-update diesel: S\$$(jq -r .price data/diesel-price.json)/L from $(jq -r .source data/diesel-price.json)"
+            git push
+          fi
