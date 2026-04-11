@@ -162,35 +162,84 @@
             }
         });
     });
-    // Fetch live diesel price from JSON
+    // Fetch live diesel price and auto-calculate ALL linked numbers
     fetch("data/diesel-price.json?" + Date.now())
         .then(function(r) { return r.json(); })
         .then(function(data) {
+            if (!data.price) return;
+
+            var price = data.price;
+            var EVOX_ANNUAL = 14076;   // EVOX fixed annual cost
+            var INVEST = 70000;        // Approximate system investment
+            var DAILY_LITRES = 65;     // Daily diesel consumption
+            var DAYS_PER_MONTH = 26;
+
+            // ── Calculate all numbers from diesel price ──
+            var dailyCost = price * DAILY_LITRES;
+            var monthlyCost = dailyCost * DAYS_PER_MONTH;
+            var annualDiesel = monthlyCost * 12;
+            var annualSavings = annualDiesel - EVOX_ANNUAL;
+            var savingsPct = Math.round((annualSavings / annualDiesel) * 100);
+            var tenYearSavings = annualSavings * 10;
+            var roiMultiple = (tenYearSavings / INVEST).toFixed(1);
+            var paybackMonths = Math.round(INVEST / (annualSavings / 12));
+
+            function fmt(n) { return n.toLocaleString("en-SG", {maximumFractionDigits:0}); }
+
+            // ── 1. Diesel price stat card ──
             var el = document.querySelector('.stat-number[data-target]');
-            if (el && data.price) {
-                el.setAttribute("data-target", data.price.toFixed(2));
-                // Update title with exact date
-                var titleEl = el.parentElement.querySelector(".stat-title");
-                if (titleEl && data.date) {
-                    titleEl.textContent = "Diesel Price (" + data.date + ")";
-                }
-                // Update description with source, last updated, and next check
-                var descEl = el.parentElement.querySelector(".stat-desc");
-                if (descEl && data.updated_at) {
-                    var updated = new Date(data.updated_at);
-                    var updatedStr = updated.toLocaleDateString("en-SG", {day:"numeric", month:"short", year:"numeric"});
-                    // Next check is tomorrow at 10am SGT
-                    var next = new Date(updated);
-                    next.setDate(next.getDate() + 1);
-                    next.setHours(10, 0, 0, 0);
-                    var nextStr = next.toLocaleDateString("en-SG", {day:"numeric", month:"short", year:"numeric"}) + " 10:00 AM SGT";
-                    descEl.innerHTML = "S$" + data.price.toFixed(2) + "/L at Singapore pump stations." +
-                        "<br><small style='color:#666;'>Source: " + (data.source || "GlobalPetrolPrices.com") +
-                        " &bull; Updated: " + updatedStr +
-                        " &bull; Next check: " + nextStr + "</small>";
-                }
+            if (el) el.setAttribute("data-target", price.toFixed(2));
+
+            var titleEl = el && el.parentElement.querySelector(".stat-title");
+            if (titleEl && data.date) titleEl.textContent = "Diesel Price (" + data.date + ")";
+
+            var descEl = el && el.parentElement.querySelector(".stat-desc");
+            if (descEl && data.updated_at) {
+                var updated = new Date(data.updated_at);
+                var updatedStr = updated.toLocaleDateString("en-SG", {day:"numeric", month:"short", year:"numeric"});
+                var next = new Date(updated);
+                next.setDate(next.getDate() + 1);
+                next.setHours(10, 0, 0, 0);
+                var nextStr = next.toLocaleDateString("en-SG", {day:"numeric", month:"short", year:"numeric"}) + " 10:00 AM SGT";
+                descEl.innerHTML = "S$" + price.toFixed(2) + "/L at Singapore pump stations." +
+                    "<br><small style='color:#666;'>Source: " + (data.source || "petrolprice.sg") +
+                    " &bull; Updated: " + updatedStr +
+                    " &bull; Next auto-check: " + nextStr + "</small>";
             }
+
+            // ── 2. Hero section ──
+            var heroP = document.getElementById("hero-saving-pct");
+            if (heroP) heroP.textContent = savingsPct + "%";
+            var heroSub = document.getElementById("hero-subtitle-pct");
+            if (heroSub) heroSub.textContent = savingsPct;
+
+            // ── 3. Pillar "XX% Lower Cost" ──
+            var pillar = document.getElementById("pillar-cost-pct");
+            if (pillar) pillar.textContent = savingsPct + "% Lower Cost";
+
+            // ── 4. Cost comparison - diesel side ──
+            var dieselAnn = document.getElementById("diesel-annual");
+            if (dieselAnn) dieselAnn.innerHTML = "S$" + fmt(annualDiesel) + "<span>/yr</span>";
+            var dieselDay = document.getElementById("diesel-daily");
+            if (dieselDay) dieselDay.textContent = "Fuel: " + DAILY_LITRES + "L/day × S$" + price.toFixed(2) + " = S$" + fmt(dailyCost) + "/day";
+            var dieselMon = document.getElementById("diesel-monthly");
+            if (dieselMon) dieselMon.textContent = "Monthly fuel: ~S$" + fmt(monthlyCost);
+
+            // ── 5. Savings VS section ──
+            var savAmt = document.getElementById("annual-savings");
+            if (savAmt) savAmt.textContent = "S$" + fmt(annualSavings);
+            var savPct = document.getElementById("savings-pct");
+            if (savPct) savPct.textContent = savingsPct + "% reduction";
+
+            // ── 6. ROI banner ──
+            var roiPay = document.getElementById("roi-payback");
+            if (roiPay) roiPay.textContent = paybackMonths + " months";
+            var roi10 = document.getElementById("roi-10yr");
+            if (roi10) roi10.textContent = "S$" + fmt(tenYearSavings);
+            var roiX = document.getElementById("roi-multiple");
+            if (roiX) roiX.textContent = roiMultiple + "x";
+
         })
-        .catch(function() { /* use fallback hardcoded value */ });
+        .catch(function() { /* use fallback hardcoded values */ });
 
 })();

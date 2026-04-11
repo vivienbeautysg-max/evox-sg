@@ -33,13 +33,13 @@
         <div class="container hero-content">
             <div class="hero-badge">Smart Mobile Energy</div>
             <h1 class="hero-title">Diesel Price Increase?<br><span class="text-green">Upgrade to Smart Energy.</span></h1>
-            <p class="hero-subtitle">Singapore's premier Battery Energy Storage Systems for construction sites. Cut fuel costs by 74%. Zero emissions. Zero noise.</p>
+            <p class="hero-subtitle">Singapore's premier Battery Energy Storage Systems for construction sites. Cut fuel costs by <span id="hero-subtitle-pct">74</span>%. Zero emissions. Zero noise.</p>
             <div class="hero-actions">
                 <a href="https://wa.me/6589596188?text=Hi%20EVOX%2C%20I%27d%20like%20a%20free%20site%20assessment." target="_blank" class="btn btn-primary btn-lg">WhatsApp Free Assessment</a>
                 <a href="#products" class="btn btn-outline btn-lg">View Products</a>
             </div>
             <div class="hero-stats">
-                <div class="hero-stat"><span class="hero-stat-number">74%</span><span class="hero-stat-label">Cost Savings</span></div>
+                <div class="hero-stat"><span class="hero-stat-number" id="hero-saving-pct">74%</span><span class="hero-stat-label">Cost Savings</span></div>
                 <div class="hero-stat-divider"></div>
                 <div class="hero-stat"><span class="hero-stat-number">0</span><span class="hero-stat-label">Emissions</span></div>
                 <div class="hero-stat-divider"></div>
@@ -65,7 +65,7 @@
             <div class="section-label fade-in">The EVOX Advantage</div>
             <h2 class="section-title fade-in">Why Industry Leaders <span class="text-green">Choose EVOX</span></h2>
             <div class="pillars-grid">
-                <div class="pillar-card fade-in"><div class="pillar-number">01</div><h3 class="pillar-title">89% Lower Cost</h3><p class="pillar-desc">Electricity from BESS costs a fraction of diesel per kWh. Immediate ROI from day one of deployment.</p></div>
+                <div class="pillar-card fade-in"><div class="pillar-number">01</div><h3 class="pillar-title" id="pillar-cost-pct">89% Lower Cost</h3><p class="pillar-desc">Electricity from BESS costs a fraction of diesel per kWh. Immediate ROI from day one of deployment.</p></div>
                 <div class="pillar-card fade-in"><div class="pillar-number">02</div><h3 class="pillar-title">Zero Emissions</h3><p class="pillar-desc">100% clean energy. Meet Singapore Green Mark requirements and ESG commitments effortlessly.</p></div>
                 <div class="pillar-card fade-in"><div class="pillar-number">03</div><h3 class="pillar-title">24/7 Monitoring</h3><p class="pillar-desc">Cloud-based EMS with real-time dashboards, predictive alerts, and remote control from anywhere.</p></div>
                 <div class="pillar-card fade-in"><div class="pillar-number">04</div><h3 class="pillar-title">10-Year Lifespan</h3><p class="pillar-desc">LiFePO4 chemistry delivers 6,000+ cycles. Built for the demands of tropical construction environments.</p></div>
@@ -108,10 +108,10 @@
             <div class="comparison-wrapper fade-in">
                 <div class="comparison-card comparison-diesel">
                     <div class="comparison-header"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg><h3>Diesel Generator</h3><div class="comparison-label">Current Cost</div></div>
-                    <div class="comparison-amount comparison-amount-red">S$94,848<span>/yr</span></div>
-                    <ul class="comparison-list"><li>Fuel: 65L/day × S$4.68 = S$304/day</li><li>Monthly fuel: ~S$7,904</li><li>Maintenance: ~S$300/month</li><li>Noise, permits, carbon liability</li><li>Fuel theft risk</li></ul>
+                    <div class="comparison-amount comparison-amount-red" id="diesel-annual">S$94,848<span>/yr</span></div>
+                    <ul class="comparison-list"><li id="diesel-daily">Fuel: 65L/day × S$4.68 = S$304/day</li><li id="diesel-monthly">Monthly fuel: ~S$7,904</li><li>Maintenance: ~S$300/month</li><li>Noise, permits, carbon liability</li><li>Fuel theft risk</li></ul>
                 </div>
-                <div class="comparison-vs"><div class="vs-circle">VS</div><div class="vs-savings"><div class="vs-save-label">Annual Savings</div><div class="vs-save-amount">S$80,772</div><div class="vs-save-percent">85% reduction</div></div></div>
+                <div class="comparison-vs"><div class="vs-circle">VS</div><div class="vs-savings"><div class="vs-save-label">Annual Savings</div><div class="vs-save-amount" id="annual-savings">S$80,772</div><div class="vs-save-percent" id="savings-pct">85% reduction</div></div></div>
                 <div class="comparison-card comparison-evox">
                     <div class="comparison-header"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#39E75F" stroke-width="1.5"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg><h3>EVOX BESS</h3><div class="comparison-label">Smart Energy Cost</div></div>
                     <div class="comparison-amount comparison-amount-green">S$14,076<span>/yr</span></div>
@@ -119,11 +119,11 @@
                 </div>
             </div>
             <div class="roi-banner fade-in">
-                <div class="roi-item"><span class="roi-value">12 months</span><span class="roi-label">Typical Payback</span></div>
+                <div class="roi-item"><span class="roi-value" id="roi-payback">12 months</span><span class="roi-label">Typical Payback</span></div>
                 <div class="roi-divider"></div>
-                <div class="roi-item"><span class="roi-value">S$807,720</span><span class="roi-label">10-Year Savings</span></div>
+                <div class="roi-item"><span class="roi-value" id="roi-10yr">S$807,720</span><span class="roi-label">10-Year Savings</span></div>
                 <div class="roi-divider"></div>
-                <div class="roi-item"><span class="roi-value">11.5x</span><span class="roi-label">Return on Investment</span></div>
+                <div class="roi-item"><span class="roi-value" id="roi-multiple">11.5x</span><span class="roi-label">Return on Investment</span></div>
             </div>
         </div>
     </section>
