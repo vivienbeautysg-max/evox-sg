@@ -34,7 +34,7 @@ jobs:
             exit 0
           fi
 
-          DATE=$(date +%Y-%m-%d)
+          DATE=$(date -u +"%d %b %Y")
           UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
 
           cat > data/diesel-price.json << EOF

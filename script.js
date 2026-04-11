@@ -169,10 +169,25 @@
             var el = document.querySelector('.stat-number[data-target]');
             if (el && data.price) {
                 el.setAttribute("data-target", data.price.toFixed(2));
-                // Update date label
+                // Update title with exact date
                 var titleEl = el.parentElement.querySelector(".stat-title");
                 if (titleEl && data.date) {
                     titleEl.textContent = "Diesel Price (" + data.date + ")";
+                }
+                // Update description with source, last updated, and next check
+                var descEl = el.parentElement.querySelector(".stat-desc");
+                if (descEl && data.updated_at) {
+                    var updated = new Date(data.updated_at);
+                    var updatedStr = updated.toLocaleDateString("en-SG", {day:"numeric", month:"short", year:"numeric"});
+                    // Next check is tomorrow at 10am SGT
+                    var next = new Date(updated);
+                    next.setDate(next.getDate() + 1);
+                    next.setHours(10, 0, 0, 0);
+                    var nextStr = next.toLocaleDateString("en-SG", {day:"numeric", month:"short", year:"numeric"}) + " 10:00 AM SGT";
+                    descEl.innerHTML = "S$" + data.price.toFixed(2) + "/L at Singapore pump stations." +
+                        "<br><small style='color:#666;'>Source: " + (data.source || "GlobalPetrolPrices.com") +
+                        " &bull; Updated: " + updatedStr +
+                        " &bull; Next check: " + nextStr + "</small>";
                 }
             }
         })
