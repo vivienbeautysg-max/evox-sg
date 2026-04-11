@@ -2,8 +2,8 @@ name: Update Singapore Diesel Price
 
 on:
   schedule:
-    - cron: '0 2 * * 1'  # Every Monday at 10am SGT (2am UTC) — data updates weekly
-  workflow_dispatch:  # Allow manual trigger anytime
+    - cron: '0 2 * * 1'  # Every Monday at 10am SGT (2am UTC)
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -14,106 +14,138 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install dependencies
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install puppeteer
+        run: npm install puppeteer
+
+      - name: Fetch diesel price with headless browser
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq jq
+          node << 'NODESCRIPT'
+          const puppeteer = require('puppeteer');
+          const fs = require('fs');
 
-      - name: Fetch Singapore diesel price
-        run: |
-          echo "=== Attempting multiple sources ==="
+          (async () => {
+            const browser = await puppeteer.launch({
+              headless: 'new',
+              args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            const page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
 
-          PRICE=""
-          SOURCE=""
+            let price = null;
+            let source = '';
 
-          # Source 1: GlobalPetrolPrices.com (official government data, SGD/L)
-          # Their page renders dynamically, so we try to find the price in meta/text
-          GPP_PAGE=$(curl -sL "https://www.globalpetrolprices.com/Singapore/diesel_prices/" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -H "Accept: text/html,application/xhtml+xml" \
-            -H "Accept-Language: en-US,en;q=0.9" \
-            --max-time 15 2>/dev/null || true)
+            // Source 1: GlobalPetrolPrices.com
+            try {
+              console.log('Trying GlobalPetrolPrices.com...');
+              await page.goto('https://www.globalpetrolprices.com/Singapore/diesel_prices/', {
+                waitUntil: 'networkidle2',
+                timeout: 30000
+              });
+              // Wait for price to render
+              await page.waitForSelector('body', { timeout: 5000 });
+              await new Promise(r => setTimeout(r, 3000));
 
-          if [ -n "$GPP_PAGE" ]; then
-            # Try multiple patterns to find the SGD price
-            PRICE=$(echo "$GPP_PAGE" | grep -oP 'SGD\s*(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
-            if [ -z "$PRICE" ]; then
-              PRICE=$(echo "$GPP_PAGE" | grep -oP '(\d+\.\d+)\s*SGD' | grep -oP '\d+\.\d+' | head -1)
-            fi
-            if [ -z "$PRICE" ]; then
-              # Look for price in specific page patterns
-              PRICE=$(echo "$GPP_PAGE" | grep -oP 'current.*?price.*?(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
-            fi
-            if [ -z "$PRICE" ]; then
-              # Try the graph data span
-              PRICE=$(echo "$GPP_PAGE" | grep -oP 'graph.*?>(\d+\.\d+)<' | grep -oP '\d+\.\d+' | head -1)
-            fi
-            if [ -n "$PRICE" ]; then
-              SOURCE="GlobalPetrolPrices.com"
-              echo "Found from GlobalPetrolPrices: SGD $PRICE"
-            fi
-          fi
+              // Extract the current price in SGD
+              const text = await page.evaluate(() => document.body.innerText);
 
-          # Source 2: TheGlobalEconomy.com (backup)
-          if [ -z "$PRICE" ]; then
-            TGE_PAGE=$(curl -sL "https://www.theglobaleconomy.com/Singapore/diesel_prices/" \
-              -H "User-Agent: Mozilla/5.0" --max-time 15 2>/dev/null || true)
-            if [ -n "$TGE_PAGE" ]; then
-              PRICE=$(echo "$TGE_PAGE" | grep -oP '\d+\.\d+(?=.*SGD)' | head -1)
-              if [ -z "$PRICE" ]; then
-                PRICE=$(echo "$TGE_PAGE" | grep -oP 'SGD.*?(\d+\.\d+)' | grep -oP '\d+\.\d+' | head -1)
-              fi
-              if [ -n "$PRICE" ]; then
-                SOURCE="TheGlobalEconomy.com"
-                echo "Found from TheGlobalEconomy: SGD $PRICE"
-              fi
-            fi
-          fi
+              // Look for "SGD X.XX per liter" or "current price" pattern
+              const match1 = text.match(/SGD\s+(\d+\.\d+)\s+per\s+lit/i);
+              const match2 = text.match(/current\s+price\s+(\d+\.\d+)/i);
+              const match3 = text.match(/Price\s*\(SGD\/Liter\)[\s\S]*?current\s+price\s+(\d+\.\d+)/i);
+              // Also try the table: "Current price    X.XX"
+              const match4 = text.match(/Current price\s+(\d+\.\d+)/);
+              // SGD table value
+              const match5 = text.match(/Price \(SGD\/Liter\)[\s\S]*?(\d+\.\d+)/);
 
-          # Source 3: CEIC Data (backup)
-          if [ -z "$PRICE" ]; then
-            CEIC_PAGE=$(curl -sL "https://www.ceicdata.com/en/singapore/average-retail-prices-2019100/retail-prices-diesel-per-litre" \
-              -H "User-Agent: Mozilla/5.0" --max-time 15 2>/dev/null || true)
-            if [ -n "$CEIC_PAGE" ]; then
-              PRICE=$(echo "$CEIC_PAGE" | grep -oP '\d+\.\d+(?=\s*SGD)' | head -1)
-              if [ -n "$PRICE" ]; then
-                SOURCE="CEIC Data"
-                echo "Found from CEIC: SGD $PRICE"
-              fi
-            fi
-          fi
+              const found = match1 || match2 || match3 || match4 || match5;
+              if (found) {
+                const val = parseFloat(found[1]);
+                if (val >= 1.0 && val <= 10.0) {
+                  price = val;
+                  source = 'GlobalPetrolPrices.com';
+                  console.log('Found price: SGD ' + price);
+                }
+              }
 
-          # Validate price is reasonable (between 1.00 and 10.00 SGD)
-          if [ -n "$PRICE" ]; then
-            VALID=$(echo "$PRICE" | awk '{if ($1 >= 1.0 && $1 <= 10.0) print "yes"; else print "no"}')
-            if [ "$VALID" != "yes" ]; then
-              echo "WARNING: Price $PRICE seems unreasonable, skipping update"
-              PRICE=""
-            fi
-          fi
+              if (!price) {
+                // Try direct table extraction
+                const tablePrice = await page.evaluate(() => {
+                  const rows = document.querySelectorAll('table tr');
+                  for (const row of rows) {
+                    const cells = row.querySelectorAll('td');
+                    for (const cell of cells) {
+                      const t = cell.textContent.trim();
+                      if (t === 'Current price') {
+                        const next = cell.nextElementSibling;
+                        if (next) {
+                          const num = parseFloat(next.textContent.trim());
+                          if (num >= 1.0 && num <= 10.0) return num;
+                        }
+                      }
+                    }
+                  }
+                  return null;
+                });
+                if (tablePrice) {
+                  price = tablePrice;
+                  source = 'GlobalPetrolPrices.com';
+                  console.log('Found from table: SGD ' + price);
+                }
+              }
+            } catch (e) {
+              console.log('GlobalPetrolPrices error: ' + e.message);
+            }
 
-          # If no price found, keep existing
-          if [ -z "$PRICE" ]; then
-            echo "Could not fetch price from any source, keeping existing data"
-            exit 0
-          fi
+            // Source 2: petrolprice.sg (backup - actual pump prices)
+            if (!price) {
+              try {
+                console.log('Trying petrolprice.sg...');
+                await page.goto('https://petrolprice.sg/', {
+                  waitUntil: 'networkidle2',
+                  timeout: 30000
+                });
+                await new Promise(r => setTimeout(r, 3000));
+                const text2 = await page.evaluate(() => document.body.innerText);
+                const dieselMatch = text2.match(/Diesel[\s\S]*?\$(\d+\.\d+)/);
+                if (dieselMatch) {
+                  const val = parseFloat(dieselMatch[1]);
+                  if (val >= 1.0 && val <= 10.0) {
+                    price = val;
+                    source = 'petrolprice.sg';
+                    console.log('Found from petrolprice.sg: SGD ' + price);
+                  }
+                }
+              } catch (e) {
+                console.log('petrolprice.sg error: ' + e.message);
+              }
+            }
 
-          DATE=$(date -u +"%d %b %Y")
-          UPDATED=$(date -u +%Y-%m-%dT%H:%M:%S+00:00)
+            await browser.close();
 
-          # Write clean JSON
-          jq -n \
-            --argjson price "$PRICE" \
-            --arg currency "SGD" \
-            --arg unit "litre" \
-            --arg date "$DATE" \
-            --arg source "$SOURCE" \
-            --arg updated_at "$UPDATED" \
-            '{price: $price, currency: $currency, unit: $unit, date: $date, source: $source, updated_at: $updated_at}' \
-            > data/diesel-price.json
+            if (!price) {
+              console.log('Could not fetch price from any source, keeping existing');
+              process.exit(0);
+            }
 
-          echo "Updated diesel price: SGD $PRICE on $DATE from $SOURCE"
-          cat data/diesel-price.json
+            const now = new Date();
+            const data = {
+              price: price,
+              currency: 'SGD',
+              unit: 'litre',
+              date: now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+              source: source,
+              updated_at: now.toISOString()
+            };
+
+            fs.writeFileSync('data/diesel-price.json', JSON.stringify(data, null, 2) + '\n');
+            console.log('Saved:', JSON.stringify(data));
+          })();
+          NODESCRIPT
 
       - name: Commit and push if changed
         run: |
@@ -123,6 +155,8 @@ jobs:
           if git diff --staged --quiet; then
             echo "No price change, skipping commit"
           else
-            git commit -m "Auto-update diesel: S\$$(jq -r .price data/diesel-price.json)/L from $(jq -r .source data/diesel-price.json)"
+            PRICE=$(cat data/diesel-price.json | jq -r .price)
+            SOURCE=$(cat data/diesel-price.json | jq -r .source)
+            git commit -m "Auto-update diesel: S\$$PRICE/L from $SOURCE"
             git push
           fi
