@@ -2,7 +2,7 @@ name: Update Singapore Diesel Price
 
 on:
   schedule:
-    - cron: '0 2 * * 1'  # Every Monday at 10am SGT (2am UTC)
+    - cron: '0 2 * * *'  # Every day at 10am SGT (2am UTC)
   workflow_dispatch:
 
 permissions:
