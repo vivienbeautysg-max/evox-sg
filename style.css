@@ -19,6 +19,14 @@ ul { list-style: none; }
 .nav-links li a:hover { color: #fff; background: rgba(255,255,255,0.05); }
 .nav-cta { background: #39E75F !important; color: #0D0D0D !important; font-weight: 600 !important; }
 .nav-cta:hover { background: #2fd152 !important; }
+/* Mail app tile -> mail.evox-sg.com (webmail). Desktop copy sits in the links, phone copy next to the hamburger. */
+.nav-mail { display: grid; place-items: center; width: 44px; height: 44px; flex-shrink: 0; }
+.nav-links li a.nav-mail { padding: 0; background: none; }
+.nav-mail-tile { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 11px; color: #39E75F; background: linear-gradient(180deg, #1D2B20, #131A15); box-shadow: inset 0 0 0 1px rgba(57,231,95,.30), inset 0 1px 0 rgba(255,255,255,.06), 0 4px 12px rgba(57,231,95,.12); transition: transform .15s ease-out, box-shadow .15s ease-out; }
+.nav-mail-tile svg { filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
+.nav-mail:hover .nav-mail-tile { transform: translateY(-1px); box-shadow: inset 0 0 0 1px rgba(57,231,95,.50), inset 0 1px 0 rgba(255,255,255,.06), 0 6px 16px rgba(57,231,95,.22); }
+.nav-mail:active .nav-mail-tile { transform: scale(.96); }
+.nav-mail-m { display: none; }
 .hamburger { display: none; background: none; border: none; cursor: pointer; padding: 8px; flex-direction: column; gap: 5px; position: relative; z-index: 1002; }
 .hamburger span { display: block; width: 24px; height: 2px; background: #fff; transition: all 0.3s ease; border-radius: 2px; }
 .hamburger.active span:nth-child(1) { transform: rotate(45deg) translate(5px, 5px); }
@@ -195,12 +203,15 @@ ul { list-style: none; }
     .safety-grid { grid-template-columns: repeat(2, 1fr); }
     .about-content { grid-template-columns: 1fr; }
     .footer-grid { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 768px) {
+    /* Hamburger from 1024 down: at 769-1000px the 8 links wrapped and overflowed */
     .nav-links { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #0D0D0D; flex-direction: column; align-items: center; justify-content: center; padding: 40px 24px; gap: 12px; z-index: 1001; }
     .nav-links.active { display: flex; }
     .nav-links li a { font-size: 1.1rem; padding: 14px 20px; }
     .hamburger { display: flex; }
+    .nav-mail-item { display: none; }
+    .nav-mail-m { display: grid; margin-left: auto; }
+}
+@media (max-width: 768px) {
     .hero-title { font-size: 2.2rem; }
     .hero-stats { flex-direction: column; gap: 20px; }
     .hero-stat-divider { width: 40px; height: 1px; }
