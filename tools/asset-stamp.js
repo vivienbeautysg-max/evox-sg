@@ -4,8 +4,8 @@
 /*
  * asset-stamp.js — 给网站里引用的本地 CSS / JS（以及 JS 里 fetch 的本地数据文件）打「按内容哈希」的版本号
  * ------------------------------------------------------------------
- * MAX 亲定硬规则（2026-10-23）：style.css?v=<sha256 前 8 位>。内容不变 → 版本号不变；一改 → 自动变。
- * 起因：GitHub Pages 对所有文件给 max-age=600，technoce.com 的 build.py 引用 CSS/JS 不带版本号
+ * 规则（2026-10-23）：style.css?v=<sha256 前 8 位>。内容不变 → 版本号不变；一改 → 自动变。
+ * 起因：GitHub Pages 对所有文件给 max-age=600，引用 CSS/JS 不带版本号的站点
  *       → 客户手机上「新页面 + 旧样式」错乱，只能 hard refresh。
  *
  * 用法：
@@ -40,7 +40,7 @@ const LF_EXT = /\.(html?|css|m?js|json|csv|tsv|geojson|xml|txt|svg)$/i;
 function hash8(buf) { return crypto.createHash('sha256').update(buf).digest('hex').slice(0, HASH_LEN); }
 /**
  * 文本文件先把 CRLF 统一成 LF 再算哈希。
- * 🔴 为什么（2026-10-23 实测）：本机 git 系统级 core.autocrlf=true —— evox 工作区 style.css 有 229 个 CR，
+ * 🔴 为什么（2026-10-23 实测）：Windows 上 git 系统级 core.autocrlf=true —— 工作区 style.css 是 CRLF，
  *    GitHub 上存的 / Pages 发出去的是 LF。不统一的话：本机按 CRLF 算的 ?v= ≠ 线上内容，
  *    门（查 git 提交）永远判「过期」，CI（Linux）算的又是另一个值。统一后三处一致；只改换行不改内容 → 版本号不变（本来就该不变）。
  */
@@ -184,8 +184,74 @@ function gitFS(repo, ref, sub) {
 }
 
 /**
+ * Flutter Web 产物（flutter build web）的内容哈希链。2026-10-23 用 Flutter 3.44.2 实测（scratchpad/flutter-research）：
+ *   index.html / flutter_bootstrap.js / main.dart.js / main.dart.js_N.part.js 文件名固定、内容每次构建都变；
+ *   flutter_service_worker.js 已是自注销的清理版，不再缓存 → 只剩 HTTP 缓存头在防「新旧混搭」。
+ *   实测复现过：.js 被缓存而 .json 没被缓存 → 旧 main.dart.js + 新 assets；资源改名 → 页面卡死在加载；deferred part 不匹配 → DeferredLoadException。
+ * 链：index.html → flutter_bootstrap.js?v=<h> → buildConfig.mainJsPath "main.dart.js?v=<h>" → deferred part 改名 main.dart.js_N.<h>.part.js
+ *   （deferred part 不能用 ?v=：dart2js 运行时会把 ? 编码成 %3F → 404，只能改文件名）。
+ * 管不到：assets/**、canvaskit/**、version.json、manifest.json —— 引擎拼路径时不带参数，必须靠服务端 no-cache。
+ * 返回 Map(rel → 改写后的 Buffer)；renames 记录改名；problems 带 kind。
+ */
+function flutterPrepass(fsx, files, write, problems, renames) {
+  const over = new Map();
+  const has = new Set(files);
+  const push = (p) => problems.push({ flutter: true, ...p });
+  let main = fsx.read('main.dart.js');
+  if (!main) return over;
+  let mainText = main.toString('utf8');
+  const m = mainText.match(/deferredPartUris:\[([^\]]*)\]/);
+  if (m) {
+    const line = lineOf(mainText, m.index);
+    const patched = m[1].replace(/"([^"]+)"/g, (all, u) => {
+      const hashed = u.match(new RegExp('^(.+)\\.([0-9a-f]{' + HASH_LEN + '})\\.part\\.js$'));
+      if (hashed) {
+        const b = fsx.read(u);
+        if (!b) push({ kind: 'notfound', file: 'main.dart.js', line, url: u, why: 'deferred part 在 main.dart.js 里登记了，但文件不存在' });
+        else if (contentHash(u, b) !== hashed[2]) push({ kind: 'stale', file: 'main.dart.js', line, url: u, why: `deferred part 文件名里的哈希 ≠ 内容哈希 ${contentHash(u, b)}` });
+        return all;
+      }
+      const pm = u.match(/^(.+)\.part\.js$/);
+      const b = pm && has.has(u) ? fsx.read(u) : null;
+      if (!b) { push({ kind: 'notfound', file: 'main.dart.js', line, url: u, why: 'deferred part 认不出或文件不存在' }); return all; }
+      const want = `${pm[1]}.${contentHash(u, b)}.part.js`;
+      push({ kind: 'missing', file: 'main.dart.js', line, url: u, want, why: `deferred part 文件名不带内容哈希（应改名 ${want}）` });
+      if (write) { renames.set(u, want); over.set(want, b); }
+      return `"${want}"`;
+    });
+    if (write && patched !== m[1]) { mainText = mainText.replace(m[0], () => `deferredPartUris:[${patched}]`); main = Buffer.from(mainText, 'utf8'); over.set('main.dart.js', main); }
+  }
+  const boot = fsx.read('flutter_bootstrap.js');
+  if (!boot) return over;
+  let bootText = boot.toString('utf8');
+  const c = bootText.match(/_flutter\.buildConfig\s*=\s*(\{[^\n]*\});/);
+  if (!c) { push({ kind: 'missing', file: 'flutter_bootstrap.js', line: 1, url: '', why: '找不到 _flutter.buildConfig（自定义 bootstrap？）——无法自动核对 main.dart.js 的版本' }); return over; }
+  let cfg;
+  try { cfg = JSON.parse(c[1]); } catch (_) { push({ kind: 'other', file: 'flutter_bootstrap.js', line: lineOf(bootText, c.index), url: '', why: '_flutter.buildConfig 不是合法 JSON' }); return over; }
+  const line = lineOf(bootText, c.index);
+  let changed = false;
+  for (const b of cfg.builds || []) {
+    for (const k of ['mainJsPath', 'mainWasmPath', 'jsSupportRuntimePath']) {
+      if (typeof b[k] !== 'string') continue;
+      const { p, q } = splitUrl(b[k]);
+      const buf = over.get(p) || fsx.read(p);
+      if (!buf) { push({ kind: 'notfound', file: 'flutter_bootstrap.js', line, url: b[k], why: `buildConfig.${k} 指向的文件不存在` }); continue; }
+      const h = contentHash(p, buf), cur = getV(q);
+      if (cur === h) continue;
+      const want = setV(b[k], h);
+      push({ kind: cur == null ? 'missing' : 'stale', file: 'flutter_bootstrap.js', line, url: b[k], want, why: cur == null ? `buildConfig.${k} 缺版本号` : `buildConfig.${k} 版本号过期（写的 ${cur}，内容哈希是 ${h}）` });
+      b[k] = want; changed = true;
+    }
+  }
+  if (write && changed) { bootText = bootText.replace(c[1], () => JSON.stringify(cfg)); over.set('flutter_bootstrap.js', Buffer.from(bootText, 'utf8')); }
+  return over;
+}
+const FLUTTER_LEAF = /^(main\.dart\.(js|wasm|mjs)|flutter\.js|flutter_bootstrap\.js|flutter_service_worker\.js|main\.dart\.js_\d+(\.[0-9a-f]+)?\.part\.js|canvaskit\/.*|assets\/.*)$/;
+
+/**
  * 核心：分析（可选改写）一个站点。
- * @returns {{problems: Array<{file,line,url,why,want?}>, rewrites: Map<string,string>, flutter: boolean, htmlCount: number}}
+ * problems[].kind：missing 缺版本号 · stale 过期 · notfound 文件不存在 · dynamic 动态参数 · outside 越界 · encoding 非 UTF-8 · other
+ * @returns {{problems, rewrites: Map<string,string|Buffer>, renames: Map<string,string>, flutter: boolean, htmlCount: number}}
  */
 function analyze(fsx, opts = {}) {
   const write = !!opts.write;
@@ -195,6 +261,11 @@ function analyze(fsx, opts = {}) {
   const visiting = new Set();
   const problems = [];
   const rewrites = new Map();
+  const renames = new Map();
+  const flutter = files.includes('flutter_bootstrap.js') && files.includes('main.dart.js');
+  const over = flutter ? flutterPrepass(fsx, files, write, problems, renames) : new Map();
+  for (const [rel, buf] of over) if (!renames.has(rel) && ![...renames.values()].includes(rel)) rewrites.set(rel, buf);
+  const read = (rel) => (over.has(rel) ? over.get(rel) : fsx.read(rel));
 
   function processText(rel, text) {
     const refs = extractRefs(rel, text);
@@ -202,17 +273,17 @@ function analyze(fsx, opts = {}) {
     for (let i = refs.length - 1; i >= 0; i--) {
       const r = refs[i];
       const line = lineOf(text, r.start);
-      if (r.dynamic) { problems.push({ file: rel, line, url: r.url, why: '动态缓存参数（如 Date.now()）——改成按内容哈希 ?v=' }); continue; }
+      if (r.dynamic) { problems.push({ kind: 'dynamic', file: rel, line, url: r.url, why: '动态缓存参数（如 Date.now()）——改成按内容哈希 ?v=' }); continue; }
       const { p, q } = splitUrl(r.url);
       if (hasBuildHash(p)) continue;
       const target = resolveRef(rel, p);
-      if (!target) { problems.push({ file: rel, line, url: r.url, why: '指到站点根目录外，无法核对' }); continue; }
+      if (!target) { problems.push({ kind: 'outside', file: rel, line, url: r.url, why: '指到站点根目录外，无法核对' }); continue; }
       const t = finalOf(target);
-      if (!t) { problems.push({ file: rel, line, url: r.url, why: '引用的文件不存在（线上会 404）' }); continue; }
+      if (!t) { problems.push({ kind: 'notfound', file: rel, line, url: r.url, why: '引用的文件不存在（线上会 404）' }); continue; }
       const cur = getV(q);
       if (cur === t.hash) continue;
       const want = setV(r.url, t.hash);
-      problems.push({ file: rel, line, url: r.url, want, why: cur == null ? '缺版本号' : `版本号过期（写的 ${cur}，内容哈希是 ${t.hash}）` });
+      problems.push({ kind: cur == null ? 'missing' : 'stale', file: rel, line, url: r.url, want, why: cur == null ? '缺版本号' : `版本号过期（写的 ${cur}，内容哈希是 ${t.hash}）` });
       if (write) out = out.slice(0, r.start) + want + out.slice(r.end);
     }
     return out;
@@ -220,13 +291,13 @@ function analyze(fsx, opts = {}) {
 
   function finalOf(rel) {
     if (cache.has(rel)) return cache.get(rel);
-    const raw = fsx.read(rel);
+    const raw = read(rel);
     if (raw == null) return null;
     let buf = raw;
-    if (TEXT_EXT.test(rel) && !hasBuildHash('/' + rel) && !visiting.has(rel)) {
+    if (TEXT_EXT.test(rel) && !hasBuildHash('/' + rel) && !visiting.has(rel) && !(flutter && FLUTTER_LEAF.test(rel))) {
       const text = raw.toString('utf8');
       if (!Buffer.from(text, 'utf8').equals(raw)) {
-        if (extractRefs(rel, raw.toString('latin1')).length) problems.push({ file: rel, line: 1, url: '', why: '文件不是 UTF-8，不能自动改写，请先转成 UTF-8' });
+        if (extractRefs(rel, raw.toString('latin1')).length) problems.push({ kind: 'encoding', file: rel, line: 1, url: '', why: '文件不是 UTF-8，不能自动改写，请先转成 UTF-8' });
       } else {
         visiting.add(rel);
         const out = processText(rel, text);
@@ -241,8 +312,7 @@ function analyze(fsx, opts = {}) {
 
   for (const h of htmlFiles) finalOf(h);
   problems.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line));
-  const flutter = files.includes('flutter_bootstrap.js') || files.includes('main.dart.js');
-  return { problems, rewrites, flutter, htmlCount: htmlFiles.length };
+  return { problems, rewrites, renames, flutter, htmlCount: htmlFiles.length };
 }
 
 /** 只查单个 HTML 文件（写文件时的提醒用）；root 用来解析 /xxx 这种根路径 */
@@ -270,6 +340,7 @@ function cli(argv) {
   if (!fs.existsSync(root)) { console.error(`目录不存在：${root}`); return 2; }
   if (mode === 'write') {
     const r = analyze(dirFS(root), { write: true });
+    for (const [from, to] of r.renames) { fs.renameSync(path.join(root, ...from.split('/')), path.join(root, ...to.split('/'))); console.log(`  改名 ${from} → ${to}`); }
     for (const [rel, text] of r.rewrites) fs.writeFileSync(path.join(root, ...rel.split('/')), text, 'utf8');
     const after = analyze(dirFS(root));
     console.log(`asset-stamp --write ${root}：扫了 ${r.htmlCount} 个 HTML，改写 ${r.rewrites.size} 个文件（${r.problems.length - after.problems.length} 处版本号）`);
