@@ -23,6 +23,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Every local CSS/JS/data reference must carry ?v=<sha256 of its content, first 8 hex>.
+      # --write self-heals a commit that forgot to re-stamp; --check fails the deploy if anything is left.
+      - name: Stamp content-hash versions
+        run: node tools/asset-stamp.js --write . && node tools/asset-stamp.js --check .
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
