@@ -163,7 +163,7 @@
         });
     });
     // Fetch live diesel price and auto-calculate ALL linked numbers
-    fetch("data/diesel-price.json?v=3fefe845")
+    fetch("data/diesel-price.json?v=c83fafce")
         .then(function(r) { return r.json(); })
         .then(function(data) {
             if (!data.price) return;
